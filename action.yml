@@ -1,64 +1,76 @@
-name: 'Paper Plugin Auto-Updater & Smoke Test'
-description: 'Automated PaperMC and Purpur version discovery, plugin dependency bumping, compilation, and headless server smoke testing.'
-author: 'sqrilizz'
+name: "Paper Plugin Auto-Updater & Smoke Test"
+description: "Automated PaperMC and Purpur version discovery, plugin dependency bumping, compilation, and headless server smoke testing."
+author: "sqrilizz"
+
+branding:
+  icon: "refresh-cw"
+  color: "green"
 
 inputs:
   project-dir:
-    description: 'Path to the plugin project root'
+    description: "Path to the plugin project root"
     required: false
-    default: '.'
+    default: "."
   software:
-    description: 'Server software to track (paper or purpur)'
+    description: "Server software to track (paper or purpur)"
     required: false
-    default: 'paper'
+    default: "paper"
   channel:
-    description: 'Release channel (STABLE or EXPERIMENTAL)'
+    description: "Release channel (STABLE or EXPERIMENTAL)"
     required: false
-    default: 'STABLE'
+    default: "STABLE"
   target-version:
-    description: 'Explicit Minecraft version to bump to'
+    description: "Explicit Minecraft version to bump to"
     required: false
-    default: ''
+    default: ""
   smoke-test:
-    description: 'Whether to launch headless server smoke test'
+    description: "Whether to launch headless server smoke test"
     required: false
-    default: 'true'
+    default: "true"
   test-commands:
-    description: 'Comma-separated server commands to run during smoke test'
+    description: "Comma-separated server commands to run during smoke test"
     required: false
-    default: 'version,plugins'
+    default: "version,plugins"
   timeout:
-    description: 'Server boot and execution timeout in seconds'
+    description: "Server boot and execution timeout in seconds"
     required: false
-    default: '120'
+    default: "120"
   auto-pr:
-    description: 'Whether to automatically create a pull request on successful test'
+    description: "Whether to automatically create a pull request on successful test"
     required: false
-    default: 'true'
+    default: "true"
+  author-name:
+    description: "Git commit author name"
+    required: false
+    default: "github-actions[bot]"
+  author-email:
+    description: "Git commit author email"
+    required: false
+    default: "github-actions[bot]@users.noreply.github.com"
   github-token:
-    description: 'GitHub token for branch creation and pull request submission'
+    description: "GitHub token for branch creation and pull request submission"
     required: false
     default: ${{ github.token }}
 
 outputs:
   has_update:
-    description: 'Whether a new version was found'
+    description: "Whether a new version was found"
     value: ${{ steps.run_bumper.outputs.has_update }}
   current_version:
-    description: 'Current plugin target version'
+    description: "Current plugin target version"
     value: ${{ steps.run_bumper.outputs.current_version }}
   target_version:
-    description: 'New target Minecraft version'
+    description: "New target Minecraft version"
     value: ${{ steps.run_bumper.outputs.target_version }}
   build_id:
-    description: 'Downloaded server build id'
+    description: "Downloaded server build id"
     value: ${{ steps.run_bumper.outputs.build_id }}
   smoke_test_success:
-    description: 'Whether the headless smoke test succeeded'
+    description: "Whether the headless smoke test succeeded"
     value: ${{ steps.run_bumper.outputs.smoke_test_success }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Set up Rust
       uses: dtolnay/rust-toolchain@stable
@@ -112,9 +124,11 @@ runs:
         NEW_VER: ${{ steps.run_bumper.outputs.target_version }}
         BUILD_ID: ${{ steps.run_bumper.outputs.build_id }}
         SOFTWARE: ${{ inputs.software }}
+        AUTHOR_NAME: ${{ inputs.author-name }}
+        AUTHOR_EMAIL: ${{ inputs.author-email }}
       run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git config user.name "$AUTHOR_NAME"
+        git config user.email "$AUTHOR_EMAIL"
         BRANCH="bump/${SOFTWARE}-${NEW_VER}"
 
         git checkout -b "$BRANCH"
