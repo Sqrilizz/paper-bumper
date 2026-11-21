@@ -235,13 +235,33 @@ impl ProjectManager {
         let pom_path = self.root_dir.join("pom.xml");
 
         let (executable, args) = if gradlew_path.exists() {
+            let abs_gradlew = gradlew_path.canonicalize().unwrap_or(gradlew_path);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(meta) = fs::metadata(&abs_gradlew) {
+                    let mut perms = meta.permissions();
+                    perms.set_mode(0o755);
+                    let _ = fs::set_permissions(&abs_gradlew, perms);
+                }
+            }
             (
-                gradlew_path.to_string_lossy().to_string(),
+                abs_gradlew.to_string_lossy().to_string(),
                 vec!["build", "-x", "test"],
             )
         } else if mvnw_path.exists() {
+            let abs_mvnw = mvnw_path.canonicalize().unwrap_or(mvnw_path);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(meta) = fs::metadata(&abs_mvnw) {
+                    let mut perms = meta.permissions();
+                    perms.set_mode(0o755);
+                    let _ = fs::set_permissions(&abs_mvnw, perms);
+                }
+            }
             (
-                mvnw_path.to_string_lossy().to_string(),
+                abs_mvnw.to_string_lossy().to_string(),
                 vec!["package", "-DskipTests"],
             )
         } else if pom_path.exists() {
@@ -278,7 +298,7 @@ impl ProjectManager {
         if let Some(explicit) = explicit_path {
             let candidate = self.root_dir.join(explicit);
             if candidate.is_file() {
-                return Ok(candidate);
+                return Ok(candidate.canonicalize().unwrap_or(candidate));
             }
             bail!(
                 "Specified plugin jar path does not exist: {}",
@@ -305,7 +325,7 @@ impl ProjectManager {
                     if file_name.ends_with("-sources.jar") || file_name.ends_with("-javadoc.jar") {
                         continue;
                     }
-                    candidates.push(path);
+                    candidates.push(path.canonicalize().unwrap_or(path));
                 }
             }
         }

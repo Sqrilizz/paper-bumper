@@ -311,11 +311,18 @@ async fn main() -> Result<()> {
 
             if !skip_smoke {
                 let resolved_plugin_jar = project.find_plugin_jar(plugin_jar.as_deref())?;
-                let server_jar_dest = work_dir.join(&build.jar_name);
 
-                println!("Downloading server jar {}...", build.jar_name);
-                api.download_file(&build.download_url, &server_jar_dest)
-                    .await?;
+                let cache_dir = env::temp_dir().join("paper-bumper-cache");
+                tokio::fs::create_dir_all(&cache_dir).await?;
+                let server_jar_dest = cache_dir.join(&build.jar_name);
+
+                if !server_jar_dest.exists() {
+                    println!("Downloading server jar {}...", build.jar_name);
+                    api.download_file(&build.download_url, &server_jar_dest)
+                        .await?;
+                } else {
+                    println!("Using cached server jar {}.", build.jar_name);
+                }
 
                 let test_commands = if commands.is_empty() {
                     vec!["version".to_string(), "plugins".to_string()]
