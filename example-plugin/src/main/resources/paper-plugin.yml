@@ -1,0 +1,6 @@
+name: SamplePlugin
+version: '1.0.0'
+main: com.example.sampleplugin.SamplePlugin
+api-version: '26.3'
+author: sqrilizz
+description: Sample Paper plugin for automated version bump and smoke test verification

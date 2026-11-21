@@ -1,0 +1,128 @@
+name: 'Paper Plugin Auto-Updater & Smoke Test'
+description: 'Automated PaperMC and Purpur version discovery, plugin dependency bumping, compilation, and headless server smoke testing.'
+author: 'sqrilizz'
+
+inputs:
+  project-dir:
+    description: 'Path to the plugin project root'
+    required: false
+    default: '.'
+  software:
+    description: 'Server software to track (paper or purpur)'
+    required: false
+    default: 'paper'
+  channel:
+    description: 'Release channel (STABLE or EXPERIMENTAL)'
+    required: false
+    default: 'STABLE'
+  target-version:
+    description: 'Explicit Minecraft version to bump to'
+    required: false
+    default: ''
+  smoke-test:
+    description: 'Whether to launch headless server smoke test'
+    required: false
+    default: 'true'
+  test-commands:
+    description: 'Comma-separated server commands to run during smoke test'
+    required: false
+    default: 'version,plugins'
+  timeout:
+    description: 'Server boot and execution timeout in seconds'
+    required: false
+    default: '120'
+  auto-pr:
+    description: 'Whether to automatically create a pull request on successful test'
+    required: false
+    default: 'true'
+  github-token:
+    description: 'GitHub token for branch creation and pull request submission'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  has_update:
+    description: 'Whether a new version was found'
+    value: ${{ steps.run_bumper.outputs.has_update }}
+  current_version:
+    description: 'Current plugin target version'
+    value: ${{ steps.run_bumper.outputs.current_version }}
+  target_version:
+    description: 'New target Minecraft version'
+    value: ${{ steps.run_bumper.outputs.target_version }}
+  build_id:
+    description: 'Downloaded server build id'
+    value: ${{ steps.run_bumper.outputs.build_id }}
+  smoke_test_success:
+    description: 'Whether the headless smoke test succeeded'
+    value: ${{ steps.run_bumper.outputs.smoke_test_success }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+
+    - name: Cache Cargo Dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ${{ github.action_path }}/target
+        key: cargo-paper-bumper-${{ runner.os }}-${{ hashFiles(format('{0}/Cargo.lock', github.action_path)) }}
+        restore-keys: |
+          cargo-paper-bumper-${{ runner.os }}-
+
+    - name: Build paper-bumper binary
+      shell: bash
+      run: |
+        cd "${{ github.action_path }}"
+        cargo build --release
+
+    - name: Run paper-bumper
+      id: run_bumper
+      shell: bash
+      env:
+        GITHUB_OUTPUT: ${{ github.output }}
+      run: |
+        CMD=("${{ github.action_path }}/target/release/paper-bumper" "run" "--project-dir" "${{ inputs.project-dir }}" "--software" "${{ inputs.software }}" "--channel" "${{ inputs.channel }}" "--timeout" "${{ inputs.timeout }}")
+
+        if [ -n "${{ inputs.target-version }}" ]; then
+          CMD+=("--target-version" "${{ inputs.target-version }}")
+        fi
+
+        if [ "${{ inputs.smoke-test }}" != "true" ]; then
+          CMD+=("--skip-smoke")
+        fi
+
+        if [ -n "${{ inputs.test-commands }}" ]; then
+          CMD+=("--commands" "${{ inputs.test-commands }}")
+        fi
+
+        "${CMD[@]}"
+
+    - name: Create Pull Request
+      if: ${{ inputs.auto-pr == 'true' && steps.run_bumper.outputs.has_update == 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        NEW_VER: ${{ steps.run_bumper.outputs.target_version }}
+        BUILD_ID: ${{ steps.run_bumper.outputs.build_id }}
+        SOFTWARE: ${{ inputs.software }}
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        BRANCH="bump/${SOFTWARE}-${NEW_VER}"
+
+        git checkout -b "$BRANCH"
+        git commit -am "chore: bump ${SOFTWARE} to ${NEW_VER} (build ${BUILD_ID})"
+        git push origin "$BRANCH" --force
+
+        gh pr create \
+          --title "chore: bump ${SOFTWARE} to ${NEW_VER}" \
+          --body "Automated update to ${SOFTWARE} **${NEW_VER}** (Build ${BUILD_ID}). Verified with headless server smoke test." \
+          --base main \
+          --head "$BRANCH"

@@ -1,0 +1,9 @@
+target/
+test-server/
+*.jar
+*.log
+.gradle/
+build/
+skills/
+.idea/
+.vscode/
