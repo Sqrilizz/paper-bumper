@@ -46,6 +46,8 @@ impl ProjectManager {
 
         let re_paper = Regex::new(r"io\.papermc\.paper:paper-api:([0-9\.]+)").expect("valid regex");
         let re_userdev = Regex::new(r"paperweight-userdev:([0-9\.]+)").expect("valid regex");
+        let re_paper_val =
+            Regex::new(r#"(?:val|var)\s+paperApiVersion\s*=\s*"([0-9\.]+)"#).expect("valid regex");
 
         for gradle_file in ["build.gradle.kts", "build.gradle"] {
             let path = self.root_dir.join(gradle_file);
@@ -57,6 +59,11 @@ impl ProjectManager {
                     }
                 }
                 if let Some(cap) = re_userdev.captures(&content) {
+                    if let Some(m) = cap.get(1) {
+                        return Ok(Some(MinecraftVersion::parse(m.as_str())));
+                    }
+                }
+                if let Some(cap) = re_paper_val.captures(&content) {
                     if let Some(m) = cap.get(1) {
                         return Ok(Some(MinecraftVersion::parse(m.as_str())));
                     }
@@ -151,6 +158,9 @@ impl ProjectManager {
             .expect("valid regex");
         let re_userdev = Regex::new(r"(paperweight\.userdev:paperweight-userdev:)[0-9\.]+")
             .expect("valid regex");
+        let re_paper_val_update =
+            Regex::new(r#"((?:val|var)\s+paperApiVersion\s*=\s*")[0-9\.]+((\.build\.\+)?")"#)
+                .expect("valid regex");
 
         for gradle_file in ["build.gradle.kts", "build.gradle"] {
             let path = self.root_dir.join(gradle_file);
@@ -162,6 +172,9 @@ impl ProjectManager {
                     .to_string();
                 updated = re_userdev
                     .replace_all(&updated, format!("${{1}}{}", target_ver))
+                    .to_string();
+                updated = re_paper_val_update
+                    .replace_all(&updated, format!("${{1}}{}${{2}}", target_ver))
                     .to_string();
 
                 if updated != original {
