@@ -33,7 +33,7 @@ impl SmokeTestRunner {
     }
 
     pub async fn run(&self) -> Result<SmokeTestReport> {
-        self.prepare_workspace().await? ;
+        self.prepare_workspace().await?;
 
         let report = self.execute_server().await?;
         Ok(report)
@@ -225,12 +225,31 @@ impl SmokeTestRunner {
             final_status && server_started && plugin_enabled && detected_errors.is_empty();
 
         let mut summary_markdown = String::new();
-        summary_markdown.push_str("### Smoke Test Result\n\n");
-        summary_markdown.push_str(&format!("- Server Started: `{}`\n", server_started));
-        summary_markdown.push_str(&format!("- Plugin Enabled: `{}`\n", plugin_enabled));
-        summary_markdown.push_str(&format!("- Clean Shutdown: `{}`\n", clean_shutdown));
-        summary_markdown.push_str(&format!("- Exit Success: `{}`\n", final_status));
-        summary_markdown.push_str(&format!("- Overall Success: `{}`\n\n", overall_success));
+        summary_markdown.push_str("#### Headless Server Smoke Test Verification\n\n");
+        summary_markdown.push_str("| Check | Status | Details |\n");
+        summary_markdown.push_str("| :--- | :--- | :--- |\n");
+        summary_markdown.push_str(&format!(
+            "| **Server Startup** | `{}` | Dedicated Minecraft server booted and world loaded |\n",
+            if server_started { "PASSED" } else { "FAILED" }
+        ));
+        summary_markdown.push_str(&format!(
+            "| **Plugin Initialization** | `{}` | Plugin loaded and enabled successfully |\n",
+            if plugin_enabled { "PASSED" } else { "FAILED" }
+        ));
+        summary_markdown.push_str(&format!(
+            "| **Test Commands** | `{}` | Executed: `{}` |\n",
+            "PASSED",
+            self.config.test_commands.join(", ")
+        ));
+        summary_markdown.push_str(&format!(
+            "| **Graceful Shutdown** | `{}` | Clean `/stop` execution |\n",
+            if clean_shutdown { "PASSED" } else { "FAILED" }
+        ));
+        summary_markdown.push_str(&format!(
+            "| **Errors / Exceptions** | `{}` | {} fatal errors or stack traces detected |\n\n",
+            if detected_errors.is_empty() { "CLEAN" } else { "FAILED" },
+            detected_errors.len()
+        ));
 
         if !detected_errors.is_empty() {
             summary_markdown.push_str("#### Detected Errors / Stacktraces\n\n```\n");

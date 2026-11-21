@@ -6,7 +6,7 @@ mod version;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::env;
-use std::fs::OpenOptions;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -18,8 +18,8 @@ use crate::version::MinecraftVersion;
 #[derive(Parser)]
 #[command(
     name = "paper-bumper",
-    version = "0.1.0",
-    about = "Automated Paper/Purpur plugin version updater and server smoke test runner"
+    about = "Automated Minecraft and Paper plugin version bumper with headless server smoke tests",
+    version
 )]
 struct Cli {
     #[command(subcommand)]
@@ -58,8 +58,8 @@ enum Commands {
         #[arg(short, long)]
         plugin_jar: PathBuf,
 
-        #[arg(short, long, default_value = "test-server")]
-        work_dir: PathBuf,
+        #[arg(short, long)]
+        work_dir: Option<PathBuf>,
 
         #[arg(short, long, default_value = "120")]
         timeout: u64,
@@ -89,8 +89,8 @@ enum Commands {
         #[arg(long)]
         plugin_jar: Option<String>,
 
-        #[arg(short, long, default_value = "test-server")]
-        work_dir: PathBuf,
+        #[arg(short, long)]
+        work_dir: Option<PathBuf>,
 
         #[arg(short, long, default_value = "120")]
         timeout: u64,
@@ -120,12 +120,11 @@ async fn main() -> Result<()> {
         } => {
             let server_software = ServerSoftware::parse(&software)?;
             let release_channel = ReleaseChannel::parse(&channel)?;
-            let api = ApiClient::new()?;
+
             let project = ProjectManager::new(&project_dir);
-
             let metadata = project.inspect()?;
-            let current = metadata.current_version;
 
+            let api = ApiClient::new()?;
             let versions = api
                 .get_available_versions(server_software, release_channel)
                 .await?;
@@ -133,6 +132,7 @@ async fn main() -> Result<()> {
                 .last()
                 .context("No available versions returned from server API")?;
 
+            let current = metadata.current_version;
             let has_update = match &current {
                 Some(curr) => latest > curr,
                 None => true,
@@ -141,6 +141,16 @@ async fn main() -> Result<()> {
             let build = api
                 .get_build_info(server_software, &latest.raw, release_channel)
                 .await?;
+
+            println!(
+                "Current version: {}",
+                current
+                    .as_ref()
+                    .map(|v| v.raw.as_str())
+                    .unwrap_or("unknown")
+            );
+            println!("Latest version:  {} (Build {})", latest.raw, build.build_id);
+            println!("Update needed:   {}", has_update);
 
             write_github_output("has_update", if has_update { "true" } else { "false" });
             write_github_output(
@@ -154,13 +164,6 @@ async fn main() -> Result<()> {
             write_github_output("build_id", &build.build_id);
             write_github_output("download_url", &build.download_url);
             write_github_output("jar_name", &build.jar_name);
-
-            println!(
-                "Current version: {}",
-                current.map(|v| v.raw).unwrap_or_else(|| "unknown".into())
-            );
-            println!("Target version:  {} (Build {})", latest.raw, build.build_id);
-            println!("Has update:      {}", has_update);
         }
 
         Commands::Bump {
@@ -187,11 +190,8 @@ async fn main() -> Result<()> {
                 }
             };
 
-            let changed = project.apply_version_update(&target)?;
-            println!(
-                "Updated files for version {}: changed={}",
-                target.raw, changed
-            );
+            let modified = project.apply_version_update(&target)?;
+            println!("Updated {} files for version {}", modified.len(), target.raw);
         }
 
         Commands::SmokeTest {
@@ -201,6 +201,8 @@ async fn main() -> Result<()> {
             timeout,
             commands,
         } => {
+            let effective_work_dir =
+                work_dir.unwrap_or_else(|| env::temp_dir().join("paper-bumper-smoke"));
             let test_commands = if commands.is_empty() {
                 vec!["version".to_string(), "plugins".to_string()]
             } else {
@@ -210,7 +212,7 @@ async fn main() -> Result<()> {
             let config = SmokeTestConfig {
                 server_jar_path: server_jar,
                 plugin_jar_path: plugin_jar,
-                work_dir,
+                work_dir: effective_work_dir,
                 timeout_seconds: timeout,
                 test_commands,
                 jvm_args: vec![
@@ -246,14 +248,15 @@ async fn main() -> Result<()> {
             timeout,
             commands,
         } => {
+            let effective_work_dir =
+                work_dir.unwrap_or_else(|| env::temp_dir().join("paper-bumper-smoke"));
             let server_software = ServerSoftware::parse(&software)?;
             let release_channel = ReleaseChannel::parse(&channel)?;
-            let api = ApiClient::new()?;
+
             let project = ProjectManager::new(&project_dir);
-
             let metadata = project.inspect()?;
-            let current = metadata.current_version;
 
+            let api = ApiClient::new()?;
             let target = match target_version {
                 Some(tv) => MinecraftVersion::parse(&tv),
                 None => {
@@ -267,6 +270,7 @@ async fn main() -> Result<()> {
                 }
             };
 
+            let current = metadata.current_version;
             let has_update = match &current {
                 Some(curr) => &target > curr,
                 None => true,
@@ -291,7 +295,10 @@ async fn main() -> Result<()> {
 
             println!(
                 "Current version: {}",
-                current.map(|v| v.raw).unwrap_or_else(|| "unknown".into())
+                current
+                    .as_ref()
+                    .map(|v| v.raw.as_str())
+                    .unwrap_or("unknown")
             );
             println!("Target version:  {} (Build {})", target.raw, build.build_id);
             println!("Has update:      {}", has_update);
@@ -302,13 +309,14 @@ async fn main() -> Result<()> {
             }
 
             println!("Applying version update to project files...");
-            project.apply_version_update(&target)?;
+            let modified_files = project.apply_version_update(&target)?;
 
             if !skip_build {
                 println!("Compiling plugin...");
                 project.build_project().await?;
             }
 
+            let mut smoke_report = None;
             if !skip_smoke {
                 let resolved_plugin_jar = project.find_plugin_jar(plugin_jar.as_deref())?;
 
@@ -333,7 +341,7 @@ async fn main() -> Result<()> {
                 let config = SmokeTestConfig {
                     server_jar_path: server_jar_dest,
                     plugin_jar_path: resolved_plugin_jar,
-                    work_dir,
+                    work_dir: effective_work_dir,
                     timeout_seconds: timeout,
                     test_commands,
                     jvm_args: vec![
@@ -355,7 +363,56 @@ async fn main() -> Result<()> {
                 if !report.success {
                     anyhow::bail!("Smoke test failed");
                 }
+                smoke_report = Some(report);
             }
+
+            let mut full_summary = String::new();
+            full_summary.push_str("## Paper Bumper Automated Update\n\n");
+            full_summary.push_str(&format!(
+                "Automated update of **{}** from `{}` to **`{}`** (Build `{}`).\n\n",
+                software,
+                current
+                    .as_ref()
+                    .map(|v| v.raw.as_str())
+                    .unwrap_or("unknown"),
+                target.raw,
+                build.build_id
+            ));
+
+            full_summary.push_str("### What Changed\n\n");
+            if modified_files.is_empty() {
+                full_summary.push_str("- Version metadata is up to date.\n\n");
+            } else {
+                for f in &modified_files {
+                    let rel = f.strip_prefix(&project_dir).unwrap_or(f);
+                    full_summary.push_str(&format!(
+                        "- Updated `{}` to target version `{}`\n",
+                        rel.display(),
+                        target.raw
+                    ));
+                }
+                full_summary.push('\n');
+            }
+
+            if let Some(rep) = &smoke_report {
+                full_summary.push_str("### Verification & Smoke Test\n\n");
+                full_summary.push_str(&rep.summary_markdown);
+                full_summary.push('\n');
+            }
+
+            full_summary.push_str("### Build & Artifact Details\n\n");
+            full_summary.push_str(&format!("- **Software**: {}\n", software));
+            full_summary.push_str(&format!("- **Target Version**: {}\n", target.raw));
+            full_summary.push_str(&format!("- **Build ID**: {}\n", build.build_id));
+            full_summary.push_str(&format!("- **Release Channel**: {}\n", channel));
+            full_summary.push_str(&format!(
+                "- **Download Artifact**: [{}]({})\n",
+                build.jar_name, build.download_url
+            ));
+
+            let summary_path = env::temp_dir().join("paper-bumper-summary.md");
+            let _ = fs::write(&summary_path, &full_summary);
+            write_github_output("summary_file", &summary_path.to_string_lossy());
         }
     }
 

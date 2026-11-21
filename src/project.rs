@@ -33,19 +33,28 @@ impl ProjectManager {
         if gradle_props.is_file() {
             let content =
                 fs::read_to_string(&gradle_props).context("Failed to read gradle.properties")?;
-            let re = Regex::new(r"(?m)^(minecraftVersion|minecraft_version|mcVersion|mc_version|paperVersion|paper_version)\s*=\s*([0-9a-zA-Z\.\-]+)")
-                .expect("valid regex");
-            for cap in re.captures_iter(&content) {
-                if let Some(val) = cap.get(2) {
-                    let raw = val.as_str().trim();
-                    let cleaned = raw.trim_end_matches("-R0.1-SNAPSHOT");
-                    return Ok(Some(MinecraftVersion::parse(cleaned)));
+            let re_mc = Regex::new(r"(?m)^(?:minecraftVersion|minecraft_version|mcVersion|mc_version)\s*=\s*([0-9\.]+)").expect("valid regex");
+            if let Some(cap) = re_mc.captures(&content) {
+                if let Some(m) = cap.get(1) {
+                    return Ok(Some(MinecraftVersion::parse(m.as_str())));
+                }
+            }
+            let re_paper = Regex::new(
+                r"(?m)^(?:paperVersion|paper_version)\s*=\s*([0-9\.]+)(?:-R0\.1-SNAPSHOT)?",
+            )
+            .expect("valid regex");
+            if let Some(cap) = re_paper.captures(&content) {
+                if let Some(m) = cap.get(1) {
+                    return Ok(Some(MinecraftVersion::parse(m.as_str())));
                 }
             }
         }
 
-        let re_paper = Regex::new(r"io\.papermc\.paper:paper-api:([0-9\.]+)").expect("valid regex");
-        let re_userdev = Regex::new(r"paperweight-userdev:([0-9\.]+)").expect("valid regex");
+        let re_paper =
+            Regex::new(r"io\.papermc\.paper:paper-api:([0-9\.]+)(-R0\.1-SNAPSHOT)?")
+                .expect("valid regex");
+        let re_userdev =
+            Regex::new(r"paperweight\.userdev:paperweight-userdev:([0-9\.]+)").expect("valid regex");
         let re_paper_val =
             Regex::new(r#"(?:val|var)\s+paperApiVersion\s*=\s*"([0-9\.]+)"#).expect("valid regex");
 
@@ -109,8 +118,8 @@ impl ProjectManager {
         Ok(None)
     }
 
-    pub fn apply_version_update(&self, new_version: &MinecraftVersion) -> Result<bool> {
-        let mut modified_any = false;
+    pub fn apply_version_update(&self, new_version: &MinecraftVersion) -> Result<Vec<PathBuf>> {
+        let mut modified_files = Vec::new();
         let target_ver = &new_version.raw;
         let api_ver = new_version.compute_api_version();
 
@@ -120,27 +129,27 @@ impl ProjectManager {
             let mut updated = original.clone();
             let patterns = [
                 (
-                    r"(?m)^(minecraftVersion\s*=\s*).*$",
+                    r"(?m)^(minecraftVersion\s*=\\s*).*$",
                     format!("${{1}}{}", target_ver),
                 ),
                 (
-                    r"(?m)^(minecraft_version\s*=\s*).*$",
+                    r"(?m)^(minecraft_version\s*=\\s*).*$",
                     format!("${{1}}{}", target_ver),
                 ),
                 (
-                    r"(?m)^(mcVersion\s*=\s*).*$",
+                    r"(?m)^(mcVersion\s*=\\s*).*$",
                     format!("${{1}}{}", target_ver),
                 ),
                 (
-                    r"(?m)^(mc_version\s*=\s*).*$",
+                    r"(?m)^(mc_version\s*=\\s*).*$",
                     format!("${{1}}{}", target_ver),
                 ),
                 (
-                    r"(?m)^(paperVersion\s*=\s*).*$",
+                    r"(?m)^(paperVersion\s*=\\s*).*$",
                     format!("${{1}}{}-R0.1-SNAPSHOT", target_ver),
                 ),
                 (
-                    r"(?m)^(paper_version\s*=\s*).*$",
+                    r"(?m)^(paper_version\s*=\\s*).*$",
                     format!("${{1}}{}-R0.1-SNAPSHOT", target_ver),
                 ),
             ];
@@ -150,7 +159,7 @@ impl ProjectManager {
             }
             if updated != original {
                 fs::write(&gradle_props, updated)?;
-                modified_any = true;
+                modified_files.push(gradle_props);
             }
         }
 
@@ -179,7 +188,7 @@ impl ProjectManager {
 
                 if updated != original {
                     fs::write(&path, updated)?;
-                    modified_any = true;
+                    modified_files.push(path);
                 }
             }
         }
@@ -203,7 +212,7 @@ impl ProjectManager {
 
             if updated != original {
                 fs::write(&pom_path, updated)?;
-                modified_any = true;
+                modified_files.push(pom_path);
             }
         }
 
@@ -220,13 +229,13 @@ impl ProjectManager {
 
                     if updated != original {
                         fs::write(&desc_path, updated)?;
-                        modified_any = true;
+                        modified_files.push(desc_path);
                     }
                 }
             }
         }
 
-        Ok(modified_any)
+        Ok(modified_files)
     }
 
     pub async fn ensure_gradle_wrapper(&self) -> Result<()> {

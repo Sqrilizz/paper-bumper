@@ -1,42 +1,40 @@
-name: "Paper Plugin Auto-Updater & Smoke Test"
-description: "Automated PaperMC and Purpur version discovery, plugin dependency bumping, compilation, and headless server smoke testing."
-author: "sqrilizz"
-
+name: "Paper Bumper"
+description: "Automatically bumps Minecraft Paper and Purpur plugin versions with headless server smoke testing"
+author: "Sqrilizz"
 branding:
   icon: "refresh-cw"
   color: "green"
 
 inputs:
   project-dir:
-    description: "Path to the plugin project root"
+    description: "Path to project root containing build.gradle(.kts) or pom.xml"
     required: false
     default: "."
   software:
-    description: "Server software to track (paper or purpur)"
+    description: "Server software to check (paper or purpur)"
     required: false
     default: "paper"
   channel:
-    description: "Release channel (STABLE or EXPERIMENTAL)"
+    description: "Release channel (STABLE, EXPERIMENTAL, ALL)"
     required: false
     default: "STABLE"
   target-version:
-    description: "Explicit Minecraft version to bump to"
+    description: "Explicit target Minecraft version to bump to (e.g. 26.3). Defaults to latest"
     required: false
-    default: ""
   smoke-test:
-    description: "Whether to launch headless server smoke test"
+    description: "Whether to run headless server smoke test after compiling"
     required: false
     default: "true"
   test-commands:
-    description: "Comma-separated server commands to run during smoke test"
+    description: "Comma-separated list of console commands to run during smoke test"
     required: false
     default: "version,plugins"
   timeout:
-    description: "Server boot and execution timeout in seconds"
+    description: "Smoke test server timeout in seconds"
     required: false
     default: "120"
   auto-pr:
-    description: "Whether to automatically create a pull request on successful test"
+    description: "Automatically create a pull request if updates are found and smoke test passes"
     required: false
     default: "true"
   author-name:
@@ -68,6 +66,9 @@ outputs:
   smoke_test_success:
     description: "Whether the headless smoke test succeeded"
     value: ${{ steps.run_bumper.outputs.smoke_test_success }}
+  summary_file:
+    description: "Path to generated summary markdown file"
+    value: ${{ steps.run_bumper.outputs.summary_file }}
 
 runs:
   using: "composite"
@@ -102,6 +103,10 @@ runs:
       run: |
         CMD=("${{ github.action_path }}/target/release/paper-bumper" "run" "--project-dir" "${{ inputs.project-dir }}" "--software" "${{ inputs.software }}" "--channel" "${{ inputs.channel }}" "--timeout" "${{ inputs.timeout }}")
 
+        if [ -n "${{ runner.temp }}" ]; then
+          CMD+=("--work-dir" "${{ runner.temp }}/paper-bumper-smoke")
+        fi
+
         if [ -n "${{ inputs.target-version }}" ]; then
           CMD+=("--target-version" "${{ inputs.target-version }}")
         fi
@@ -116,7 +121,7 @@ runs:
 
         "${CMD[@]}"
 
-    - name: Create Pull Request
+    - name: Create Pull Request and Post Comment
       if: ${{ inputs.auto-pr == 'true' && steps.run_bumper.outputs.has_update == 'true' }}
       shell: bash
       env:
@@ -126,17 +131,26 @@ runs:
         SOFTWARE: ${{ inputs.software }}
         AUTHOR_NAME: ${{ inputs.author-name }}
         AUTHOR_EMAIL: ${{ inputs.author-email }}
+        SUMMARY_FILE: ${{ steps.run_bumper.outputs.summary_file }}
       run: |
         git config user.name "$AUTHOR_NAME"
         git config user.email "$AUTHOR_EMAIL"
         BRANCH="bump/${SOFTWARE}-${NEW_VER}"
 
-        git checkout -b "$BRANCH"
-        git commit -am "chore: bump ${SOFTWARE} to ${NEW_VER} (build ${BUILD_ID})"
+        git checkout -b "$BRANCH" 2>/dev/null || git checkout "$BRANCH"
+        git add -u
+        git commit -m "chore: bump ${SOFTWARE} to ${NEW_VER} (build ${BUILD_ID})" || true
         git push origin "$BRANCH" --force
 
-        gh pr create \
-          --title "chore: bump ${SOFTWARE} to ${NEW_VER}" \
-          --body "Automated update to ${SOFTWARE} **${NEW_VER}** (Build ${BUILD_ID}). Verified with headless server smoke test." \
-          --base main \
-          --head "$BRANCH"
+        PR_URL=$(gh pr list --head "$BRANCH" --json url --jq '.[0].url')
+        if [ -z "$PR_URL" ]; then
+          PR_URL=$(gh pr create \
+            --title "chore: bump ${SOFTWARE} to ${NEW_VER}" \
+            --body-file "$SUMMARY_FILE" \
+            --base main \
+            --head "$BRANCH")
+        else
+          gh pr edit "$PR_URL" --body-file "$SUMMARY_FILE"
+        fi
+
+        gh pr comment "$PR_URL" --body-file "$SUMMARY_FILE"
