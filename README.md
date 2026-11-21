@@ -19,6 +19,7 @@ Tracks PaperMC and Purpur releases, updates build descriptors (`gradle.propertie
   - Sends diagnostic commands (`version`, `plugins`, custom plugin commands).
   - Gracefully stops the server and asserts clean `onDisable()`.
 - **Automated Pull Requests**: Creates a git branch and opens a GitHub Pull Request with a full smoke test log report.
+- **GitHub App Avatar & Badge**: Full support for authenticated GitHub App tokens with custom bot avatar and verified `[bot]` badge.
 
 ---
 
@@ -42,8 +43,21 @@ jobs:
       pull-requests: write
 
     steps:
+      - name: Generate Bot Token (Optional)
+        id: app_token
+        if: ${{ env.APP_ID != '' && env.APP_PRIVATE_KEY != '' }}
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+        env:
+          APP_ID: ${{ secrets.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app_token.outputs.token || github.token }}
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -52,13 +66,16 @@ jobs:
           java-version: '21'
 
       - name: Run Paper Bumper
-        uses: sqrilizz/paper-bumper@main
+        uses: Sqrilizz/paper-bumper@main
         with:
           software: 'paper'
           channel: 'STABLE'
           auto-pr: 'true'
           smoke-test: 'true'
           test-commands: 'version,plugins'
+          github-token: ${{ steps.app_token.outputs.token || github.token }}
+          author-name: ${{ steps.app_token.outputs.app-slug && format('{0}[bot]', steps.app_token.outputs.app-slug) || 'github-actions[bot]' }}
+          author-email: ${{ steps.app_token.outputs.app-slug && format('{0}[bot]@users.noreply.github.com', steps.app_token.outputs.app-slug) || 'github-actions[bot]@users.noreply.github.com' }}
 ```
 
 ---
@@ -76,6 +93,8 @@ jobs:
 | `timeout` | Server startup timeout in seconds | `120` |
 | `auto-pr` | Open a Pull Request when checks pass | `true` |
 | `github-token` | GitHub token for git push and PR creation | `${{ github.token }}` |
+| `author-name` | Git commit author name | `github-actions[bot]` |
+| `author-email` | Git commit author email | `github-actions[bot]@users.noreply.github.com` |
 
 ---
 

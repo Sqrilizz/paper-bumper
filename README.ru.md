@@ -19,6 +19,7 @@
   - Посылает команды в консоль сервера (`version`, `plugins` или кастомные команды плагина).
   - Корректно завершает сервер (`stop`) и проверяет `onDisable()`.
 - **Автоматический Pull Request**: Создает отдельную ветку и открывает PR с подробным markdown-отчетом и логами запуска.
+- **Поддержка аватарки и бейджа бота**: Полная поддержка GitHub App токенов для коммитов от лица официального `[bot]` с вашей аватаркой.
 
 ---
 
@@ -42,23 +43,39 @@ jobs:
       pull-requests: write
 
     steps:
+      - name: Generate Bot Token (Optional)
+        id: app_token
+        if: ${{ env.APP_ID != '' && env.APP_PRIVATE_KEY != '' }}
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+        env:
+          APP_ID: ${{ secrets.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app_token.outputs.token || github.token }}
 
-      - name: Set up Java
+      - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
 
       - name: Run Paper Bumper
-        uses: sqrilizz/paper-bumper@main
+        uses: Sqrilizz/paper-bumper@main
         with:
           software: 'paper'
           channel: 'STABLE'
           auto-pr: 'true'
           smoke-test: 'true'
           test-commands: 'version,plugins'
+          github-token: ${{ steps.app_token.outputs.token || github.token }}
+          author-name: ${{ steps.app_token.outputs.app-slug && format('{0}[bot]', steps.app_token.outputs.app-slug) || 'github-actions[bot]' }}
+          author-email: ${{ steps.app_token.outputs.app-slug && format('{0}[bot]@users.noreply.github.com', steps.app_token.outputs.app-slug) || 'github-actions[bot]@users.noreply.github.com' }}
 ```
 
 ---
@@ -76,6 +93,8 @@ jobs:
 | `timeout` | Таймаут ожидания старта сервера в секундах | `120` |
 | `auto-pr` | Создавать Pull Request при успешных тестах | `true` |
 | `github-token` | GitHub токен для пуша и создания PR | `${{ github.token }}` |
+| `author-name` | Имя автора git-коммита | `github-actions[bot]` |
+| `author-email` | Email автора git-коммита | `github-actions[bot]@users.noreply.github.com` |
 
 ---
 
