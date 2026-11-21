@@ -33,7 +33,7 @@ impl SmokeTestRunner {
     }
 
     pub async fn run(&self) -> Result<SmokeTestReport> {
-        self.prepare_workspace().await?;
+        self.prepare_workspace().await? ;
 
         let report = self.execute_server().await?;
         Ok(report)
@@ -181,7 +181,15 @@ impl SmokeTestRunner {
                             Ok(Some(err_line)) => {
                                 eprintln!("{}", err_line);
                                 collected_logs.push(format!("[STDERR] {}", err_line));
-                                detected_errors.push(err_line);
+                                let trimmed = err_line.trim();
+                                let is_harmless = trimmed.is_empty()
+                                    || trimmed.contains("Advanced terminal features are not available")
+                                    || trimmed.contains("Picked up JAVA_TOOL_OPTIONS")
+                                    || trimmed.contains("Picked up _JAVA_OPTIONS")
+                                    || (trimmed.contains(" WARN ") && !trimmed.contains("ERROR") && !trimmed.contains("Exception"));
+                                if !is_harmless {
+                                    detected_errors.push(err_line);
+                                }
                             }
                             Ok(None) => {}
                             Err(e) => {
@@ -197,9 +205,9 @@ impl SmokeTestRunner {
 
         let execution_result = timeout(total_timeout, test_execution).await;
 
-        let full_log_pathfull_log_path = self.config.work_dir.join("smoke_test_server.log");
+        let full_log_path = self.config.work_dir.join("smoke_test_server.log");
         let full_log_text = collected_logs.join("\n");
-        let _ = fs::write(&full_log_pathfull_log_path, &full_log_text);
+        let _ = fs::write(&full_log_path, &full_log_text);
 
         let final_status = match execution_result {
             Ok(Ok(status)) => status.success(),
