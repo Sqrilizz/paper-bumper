@@ -229,7 +229,35 @@ impl ProjectManager {
         Ok(modified_any)
     }
 
+    pub async fn ensure_gradle_wrapper(&self) -> Result<()> {
+        let gradlew_path = self.root_dir.join("gradlew");
+        let wrapper_jar = self
+            .root_dir
+            .join("gradle")
+            .join("wrapper")
+            .join("gradle-wrapper.jar");
+
+        if gradlew_path.exists() && !wrapper_jar.exists() {
+            println!("gradle-wrapper.jar missing, downloading official wrapper...");
+            if let Some(parent) = wrapper_jar.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            let url = "https://raw.githubusercontent.com/gradle/gradle/v8.11.1/gradle/wrapper/gradle-wrapper.jar";
+            let client = reqwest::Client::new();
+            if let Ok(resp) = client.get(url).send().await {
+                if resp.status().is_success() {
+                    if let Ok(bytes) = resp.bytes().await {
+                        let _ = fs::write(&wrapper_jar, bytes);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub async fn build_project(&self) -> Result<()> {
+        self.ensure_gradle_wrapper().await?;
+
         let gradlew_path = self.root_dir.join("gradlew");
         let mvnw_path = self.root_dir.join("mvnw");
         let pom_path = self.root_dir.join("pom.xml");
